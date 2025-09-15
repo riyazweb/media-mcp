@@ -1,0 +1,9 @@
+langchain-groq
+langchain-mcp-adapters
+langchain
+langgraph
+mcp
+ddgs
+beautifulsoup4
+requests
+streamlit
