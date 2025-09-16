@@ -2,21 +2,23 @@ from __future__ import annotations
 import time
 import traceback
 import requests
+import nltk
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from urllib.parse import urlparse
 from typing import List, Dict, Any, Generator
+from mcp.server.fastmcp import FastMCP
 
-# MCP Server Setup (placeholder for demonstration)
-class McpToolPlaceholder:
-    def tool(self, name):
-        def decorator(func):
-            return func
+mcp = FastMCP("web_search_scraper", port=8001)
 
-        return decorator
-
-
-mcp = McpToolPlaceholder()
+# --- NLTK Setup ---
+try:
+    nltk.data.find("tokenizers/punkt")
+except nltk.downloader.DownloadError:
+    print("First-time setup: Downloading NLTK 'punkt' model...")
+    nltk.download("punkt")
+    nltk.download("punkt_tab")
+    print("Download complete.")
 
 # --- Configuration ---
 DEFAULT_USER_AGENT = (
@@ -29,6 +31,7 @@ MIN_DELAY_BETWEEN_REQUESTS = 1.0  # seconds to wait between requests to the same
 _domain_last_request: Dict[str, float] = {}
 
 
+# --- Helper Functions ---
 def _get_domain(url: str) -> str | None:
     """Extracts the network location (domain) from a URL."""
     try:
@@ -53,6 +56,7 @@ def _enforce_request_delay(url: str) -> None:
     _domain_last_request[domain] = time.time()
 
 
+# --- Agent Tools ---
 @mcp.tool("search_web")
 def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
     """
@@ -63,7 +67,6 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         results_generator: Generator[Dict[str, str], None, None] = DDGS(
             timeout=DEFAULT_TIMEOUT
         ).text(query=query, max_results=max_results)
-
         results = [
             {
                 "title": r.get("title", ""),
@@ -72,7 +75,6 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
             }
             for r in results_generator
         ]
-
         return {"results": results}
     except Exception as e:
         return {
@@ -81,64 +83,119 @@ def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
         }
 
 
-@mcp.tool("scrape_site_content")
-def scrape_site_content(url: str, max_chars: int = 4000) -> Dict[str, Any]:
+@mcp.tool("extract_relevant_content")
+def extract_relevant_content(
+    url: str, query: str, max_chars: int = 3000
+) -> Dict[str, Any]:
     """
-    Scrapes the visible text content from a single webpage.
+    Scrapes a webpage and extracts the most relevant sentences based on a query.
+    This version removes all hyperlink text from the final output.
     """
-    print(f"-> Scraping content from: '{url}'")
+    print(f"-> Extracting content from '{url}' relevant to '{query}'")
     try:
-        # The robots.txt check that was here has been REMOVED.
-
         _enforce_request_delay(url)
-
         headers = {"User-Agent": DEFAULT_USER_AGENT}
         response = requests.get(url, headers=headers, timeout=DEFAULT_TIMEOUT)
         response.raise_for_status()
 
         soup = BeautifulSoup(response.text, "html.parser")
 
-        for element in soup(
-            ["script", "style", "header", "footer", "nav", "aside", "form"]
-        ):
+        # --- KEY CHANGE HERE ---
+        # Added 'a' to this list to remove all hyperlinks and their text.
+        tags_to_remove = [
+            "script",
+            "style",
+            "header",
+            "footer",
+            "nav",
+            "aside",
+            "form",
+            "a",
+        ]
+        for element in soup(tags_to_remove):
             element.decompose()
 
-        text = " ".join(soup.stripped_strings)
+        full_text = " ".join(soup.stripped_strings)
+        if not full_text:
+            return {"url": url, "content": "No text content found on the page."}
 
-        if len(text) > max_chars:
-            text = text[:max_chars] + "..."
+        sentences = nltk.sent_tokenize(full_text)
+        query_words = set(word.lower() for word in query.split())
 
-        return {"url": url, "content": text}
+        scored_sentences = []
+        for i, sentence in enumerate(sentences):
+            sentence_words = set(word.lower() for word in nltk.word_tokenize(sentence))
+            score = len(query_words.intersection(sentence_words))
+            if score > 0:
+                scored_sentences.append((score, i, sentence))
+
+        if not scored_sentences:
+            return {
+                "url": url,
+                "content": (
+                    full_text[:max_chars] + "..."
+                    if len(full_text) > max_chars
+                    else full_text
+                ),
+            }
+
+        scored_sentences.sort(key=lambda x: x[0], reverse=True)
+
+        final_sentences_to_include = {}
+        for score, index, sentence in scored_sentences:
+            final_sentences_to_include[index] = sentence
+            if index > 0:
+                final_sentences_to_include[index - 1] = sentences[index - 1]
+            if index < len(sentences) - 1:
+                final_sentences_to_include[index + 1] = sentences[index + 1]
+
+        sorted_indices = sorted(final_sentences_to_include.keys())
+        final_text = ""
+        for index in sorted_indices:
+            next_sentence = final_sentences_to_include[index]
+            if len(final_text) + len(next_sentence) + 1 > max_chars:
+                break
+            final_text += next_sentence + " "
+
+        return {"url": url, "content": final_text.strip()}
 
     except requests.exceptions.RequestException as e:
-        return {"error": f"Network error while scraping {url}: {str(e)}"}
+        return {"error": f"Network error while extracting from {url}: {str(e)}"}
     except Exception as e:
         return {
-            "error": f"scrape_site_content failed for {url}: {str(e)}",
+            "error": f"extract_relevant_content failed for {url}: {str(e)}",
             "trace": traceback.format_exc(),
         }
 
 
+# --- Test Execution Block ---
 if __name__ == "__main__":
-    print("--- Testing Web Search ---")
-    search_results = search_web(query="latest advancements in AI")
-    if "error" in search_results:
-        print(f"Error during search: {search_results['error']}")
-    elif search_results["results"]:
-        first_result = search_results["results"][0]
-        print(f"Search successful. Found {len(search_results['results'])} results.")
-        print(f"Top result: '{first_result['title']}' - {first_result['href']}")
+    mcp.run(transport="streamable-http")
+    # print("--- Running Agent Tool Test with Link Removal ---")
 
-        print("\n--- Testing Scraper (robots.txt ignored) ---")
-        scrape_url = first_result.get("href")
-        if scrape_url:
-            scraped_data = scrape_site_content(scrape_url)
-            if "error" in scraped_data:
-                print(f"Error during scraping: {scraped_data['error']}")
-            else:
-                print(f"Successfully scraped content from {scrape_url}:")
-                print("-" * 20)
-                print(scraped_data.get("content", "No content found."))
-                print("-" * 20)
-    else:
-        print("Search returned no results.")
+    # user_query = "What are the health benefits of green tea?"
+    # print(f"Goal: Answer the question '{user_query}'\n")
+
+    # search_results = search_web(query=user_query)
+
+    # if "error" in search_results or not search_results.get("results"):
+    #     print(
+    #         f"Error during search: {search_results.get('error', 'No results found.')}"
+    #     )
+    # else:
+    #     top_result = search_results["results"][0]
+    #     url_to_scrape = top_result.get("href")
+    #     print(f"Found top result: '{top_result.get('title')}'")
+    #     print(f"URL: {url_to_scrape}")
+
+    #     if url_to_scrape:
+    #         extracted_data = extract_relevant_content(
+    #             url=url_to_scrape, query=user_query
+    #         )
+
+    #         if "error" in extracted_data:
+    #             print(f"\nError during extraction: {extracted_data['error']}")
+    #         else:
+    #             print("\n--- Extracted Relevant Content (Links Removed) ---")
+    #             print(extracted_data.get("content"))
+    #             print("\n-------------------------------------------------")
