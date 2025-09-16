@@ -1,30 +1,67 @@
 import os
 import shutil
+import json
 from pathlib import Path
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 
-mcp = FastMCP("read_operations", port=8000)
+CONFIG_FILE_PATH = Path("config.json").resolve()
 
+mcp = FastMCP("file_management", port=8000)
+
+if not CONFIG_FILE_PATH.exists():
+    raise FileNotFoundError(f"Config file not found at {CONFIG_FILE_PATH}")
+
+with open(CONFIG_FILE_PATH, "r") as f:
+    config = json.load(f)
+
+if len(config.get("allowed_paths", [])) == 0:
+    print("No allowed paths found in config.json. Using only the current directory.")
+    ALLOWED_PATHS = [Path(".").expanduser().resolve()]
+else:
+    ALLOWED_PATHS = [Path(p).expanduser().resolve() for p in config["allowed_paths"]]
+
+# --- Create the directories if they don't exist ---
+print("Allowed paths:")
+for p in ALLOWED_PATHS:
+    print(f"- 📁 {p}")
+    p.mkdir(exist_ok=True)
 
 def safe_path(path: str) -> Path:
-    """Resolve and sanitize paths."""
-    return Path(path).expanduser().resolve()
+    """
+    Resolves a path and ensures it is within one of the ALLOWED_PATHS.
+    """
+    resolved_path = Path(path).expanduser().resolve()
+    if not any(
+        resolved_path == p or str(resolved_path).startswith(str(p) + os.sep)
+        for p in ALLOWED_PATHS
+    ):
+        raise PermissionError(
+            f"Access denied: {resolved_path} is not within any allowed sandbox directory."
+        )
+    return resolved_path
 
 
-def to_relative(base: Path, target: Path) -> str:
-    """Convert absolute path to relative (from base)."""
-    try:
-        return str(target.relative_to(base))
-    except ValueError:
-        return target.name
+
+@mcp.tool("allowed_paths")
+def allowed_paths():
+    """
+    Get the list of allowed directories, You are only allowed in these paths and their subdirectories.
+    Returns a list of strings representing the paths.
+    """
+    return {"paths": [str(p) for p in ALLOWED_PATHS]}
+
 
 
 @mcp.tool("current_directory")
-def current_directory(full_path: bool = False):
-    """Get the current working directory."""
-    cwd = Path(os.getcwd())
-    return str(cwd if full_path else cwd.name)
+def current_directory():
+    """
+    Get the primary working directory for the agent.
+    Returns the first path from the list of allowed sandbox directories.
+    """
+    primary_dir = ALLOWED_PATHS[0]
+    return {"path": str(primary_dir), "name": primary_dir.name}
+
 
 
 @mcp.tool("list_directory")
@@ -88,6 +125,13 @@ def delete_file(path: str, full_path: bool = False):
     """Delete a file."""
     try:
         file_path = safe_path(path)
+        if not file_path.exists():
+            return {"error": f"File not found at {path}"}
+        if not file_path.is_file():
+            return {
+                "error": f"Path is a directory, not a file. Use a directory deletion tool."
+            }
+
         file_path.unlink()
         return {
             "success": True,
@@ -182,15 +226,31 @@ def get_file_info(path: str, full_path: bool = False):
         return {"error": str(e)}
 
 
+def to_relative(base: Path, target: Path) -> str:
+    """Convert absolute path to relative (from base)."""
+    try:
+        return str(target.relative_to(base))
+    except ValueError:
+        return target.name
+
+
 @mcp.tool("search_files")
 def search_files(
-    path: str, name: str = None, extension: str = None, full_path: bool = False
+    path: str,
+    name: str = None,
+    extension: str = None,
+    recursive: bool = True,
+    max_depth: int = 3,
+    full_path: bool = False,
 ):
     """
-    Search for files inside a directory (recursive).
-    - name: match substring in filename
-    - extension: filter by file extension
-    - full_path: return absolute or relative paths
+    Search for files inside a directory.
+    - path: The directory to start the search from. Must be within the sandbox.
+    - name (optional): Match a substring in the filename (case-insensitive).
+    - extension (optional): Filter by file extension (e.g., '.txt', 'py').
+    - recursive (optional): If True, searches subdirectories. Defaults to True.
+    - max_depth (optional): Limits how deep the recursive search goes. Defaults to 3.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
     """
     try:
         base = safe_path(path)
@@ -198,14 +258,30 @@ def search_files(
             return {"error": f"{path} is not a valid directory"}
 
         results = []
-        for p in base.rglob("*"):
-            if not p.is_file():
-                continue
-            if name and name.lower() not in p.name.lower():
-                continue
-            if extension and not p.name.lower().endswith(extension.lower()):
-                continue
-            results.append(str(p if full_path else to_relative(base, p)))
+        if not recursive:
+            for p in base.iterdir():
+                if p.is_file():
+                    if name and name.lower() not in p.name.lower():
+                        continue
+                    if extension and not p.name.lower().endswith(extension.lower()):
+                        continue
+                    results.append(str(p if full_path else p.name))
+        else:
+            for dirpath, _, filenames in os.walk(base):
+                current_depth = len(Path(dirpath).relative_to(base).parts)
+                if current_depth >= max_depth:
+                    continue  # Prune search depth
+
+                for filename in filenames:
+                    if name and name.lower() not in filename.lower():
+                        continue
+                    if extension and not filename.lower().endswith(extension.lower()):
+                        continue
+
+                    full_p = Path(dirpath) / filename
+                    results.append(
+                        str(full_p if full_path else to_relative(base, full_p))
+                    )
 
         return {"results": results}
     except Exception as e:

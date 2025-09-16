@@ -3,6 +3,7 @@ import time
 import traceback
 import requests
 import nltk
+from datetime import datetime
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from urllib.parse import urlparse
@@ -57,6 +58,15 @@ def _enforce_request_delay(url: str) -> None:
 
 
 # --- Agent Tools ---
+@mcp.tool("current_datetime")
+def current_datetime():
+    """
+    Get the current date and time.
+    Returns a string in the format "YYYY-MM-DD HH:MM:SS".
+    """
+    return {"date": datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
+
+
 @mcp.tool("search_web")
 def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
     """

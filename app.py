@@ -1,96 +1,9 @@
 import streamlit as st
-import os
-import asyncio
-from dotenv import load_dotenv
-
-# LangChain and LangGraph imports
-from langchain_groq import ChatGroq
-from langgraph.prebuilt import create_react_agent
-from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-
-# Custom MCP Client import (ensure this file is in your project)
-from langchain_mcp_adapters.client import MultiServerMCPClient
-
-# Load environment variables from a .env file
-load_dotenv()
+from client.agent import init_agent
 
 # --- Streamlit Page Configuration ---
-st.set_page_config(page_title="MCP Conversational Assistant", layout="wide")
-st.title("🤖 MCP Conversational Assistant")
-
-
-# --- Agent Initialization with Conversational Prompt ---
-@st.cache_resource
-def init_agent():
-    """
-    Initialize the MCP client, tools, and the conversational agent.
-    This function is cached to prevent re-initialization on every interaction.
-    """
-    try:
-        # Configure the client to connect to your tool servers
-        client = MultiServerMCPClient(
-            {
-                "file_management": {
-                    "url": "http://localhost:8000/mcp",
-                    "transport": "streamable_http",
-                },
-                "web_search": {
-                    "url": "http://localhost:8001/mcp",
-                    "transport": "streamable_http",
-                },
-            }
-        )
-        # Set up an asyncio event loop for asynchronous operations
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-        tools = loop.run_until_complete(client.get_tools())
-
-        if not tools:
-            st.error("Failed to fetch any tools from the MCP servers.")
-            return None, None
-
-        # Get the Groq API key from environment variables
-        groq_key = os.getenv("GROQ_API_KEY")
-        if not groq_key:
-            st.error("GROQ_API_KEY environment variable not set!")
-            return None, None
-
-        # Initialize the language model
-        model = ChatGroq(api_key=groq_key, model="qwen/qwen3-32b")
-
-        # --- CORRECTED PROMPT TEMPLATE ---
-        # The extra ("user", "{input}") has been removed.
-        prompt_template = ChatPromptTemplate.from_messages(
-            [
-                (
-                    "system",
-                    """You are a helpful and conversational assistant.
-
-Your primary goal is to assist users with their requests.
-1. First, determine if you can answer the user's question directly using your own knowledge.
-2. Handle greetings and simple conversational exchanges without using tools.
-3. Only if the question requires real-time information, access to local files, or specific calculations that you cannot perform, should you use the available tools.
-4. Think step-by-step to decide if a tool is necessary.""",
-                ),
-                # This placeholder contains the entire chat history, including the latest user message.
-                MessagesPlaceholder(variable_name="messages"),
-            ]
-        )
-
-        # Create the ReAct agent, now with our custom prompt
-        agent_executor = create_react_agent(
-            model=model.bind_tools(tools),
-            tools=tools,
-            prompt=prompt_template,
-        )
-
-        return agent_executor, loop
-    except Exception as e:
-        st.error(f"Failed to initialize agent. Is an MCP server running? Error: {e}")
-        return None, None
-
-
-# --- Main Application Logic ---
+st.set_page_config(page_title="MediaMCP", page_icon="🤖")
+st.title("📁 MediaMCP")
 
 # Initialize the agent and event loop once
 agent, agent_loop = init_agent()
@@ -99,9 +12,18 @@ agent, agent_loop = init_agent()
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display past messages from the chat history
+# Display past messages from chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
+        # If the message is from the assistant and has thoughts, display them
+        if (
+            message["role"] == "assistant"
+            and "thoughts" in message
+            and message["thoughts"]
+        ):
+            with st.expander("🧠 Agent Thoughts"):
+                st.markdown(message["thoughts"])
+        # Display the main content of the message
         st.markdown(message["content"])
 
 # Handle new user input
@@ -114,53 +36,88 @@ if prompt := st.chat_input("Ask me anything..."):
     # If the agent is initialized, process the request
     if agent and agent_loop:
         with st.chat_message("assistant"):
-            # MOVED: The expander is now defined first to appear at the top.
-            with st.expander("🧠 Agent Thoughts"):
+            # UI elements for the current turn's streaming response
+            with st.expander(
+                "🧠 Thoughts", expanded=True
+            ):  # Expanded by default for visibility
                 thought_container = st.empty()
-
-            # MOVED: The placeholder for the final answer is now below the expander.
             message_placeholder = st.empty()
 
             with st.spinner("Thinking..."):
-                # State dictionary to accumulate thoughts and the final answer
+                # State dictionary to accumulate data for the current turn
                 state = {"thoughts": "", "final_answer": ""}
 
                 # Asynchronous function to stream the agent's response
                 async def stream_agent_response(state_dict):
                     async for chunk in agent.astream(inputs):
-                        # Check for agent's decision to call a tool
+                        with open("log.txt", "a") as f:
+                            f.write(f"{chunk}\n")
+
                         if "agent" in chunk:
-                            agent_step = chunk["agent"]
-                            if agent_step.get("messages"):
-                                last_message = agent_step["messages"][-1]
-                                if last_message.tool_calls:
-                                    for tc in last_message.tool_calls:
-                                        thought = f"Tool Call:\n- **Tool:** `{tc['name']}`\n- **Arguments:** `{tc['args']}`\n\n"
-                                        state_dict["thoughts"] += thought
+                            agent_step = chunk.get("agent", {})
+                            if messages := agent_step.get("messages"):
+                                last_message = messages[-1]
+
+                                # --- NEW: CAPTURE AGENT'S REASONING ---
+                                # Check for the agent's internal reasoning and display it
+                                if reasoning := last_message.additional_kwargs.get(
+                                    "reasoning_content"
+                                ):
+                                    # Check for a unique part of the reasoning to prevent duplication
+                                    if (
+                                        reasoning.split("\n")[0]
+                                        not in state_dict["thoughts"]
+                                    ):
+                                        # Process each line to apply blockquote styling correctly
+                                        formatted_reasoning = "\n".join(
+                                            [
+                                                f"> {line}"
+                                                for line in reasoning.strip().split(
+                                                    "\n"
+                                                )
+                                            ]
+                                        )
+                                        thought_md = (
+                                            f"**Reasoning:**\n{formatted_reasoning}\n\n"
+                                        )
+                                        state_dict["thoughts"] += thought_md
                                         thought_container.markdown(
                                             state_dict["thoughts"]
                                         )
+                                # --- END NEW LOGIC ---
 
-                        # Check for the output of the tool execution
-                        elif "tool" in chunk:
-                            tool_step = chunk["tool"]
-                            if tool_step.get("messages"):
-                                tool_output = tool_step["messages"][-1].content
-                                state_dict[
-                                    "thoughts"
-                                ] += f"Tool Output:\n```\n{tool_output}\n```\n\n"
-                                thought_container.markdown(state_dict["thoughts"])
+                                # Check for the agent's decision to call a tool
+                                if last_message.tool_calls:
+                                    for tc in last_message.tool_calls:
+                                        tool_call_md = (
+                                            f"**Tool Call:**\n"
+                                            f"- **Tool:** `{tc['name']}`\n"
+                                            f"- **Arguments:** `{tc['args']}`\n\n"
+                                        )
+                                        if tool_call_md not in state_dict["thoughts"]:
+                                            state_dict["thoughts"] += tool_call_md
+                                            thought_container.markdown(
+                                                state_dict["thoughts"]
+                                            )
 
-                        # Extract the final answer when no tool call is made
-                        if "agent" in chunk:
-                            agent_step = chunk.get("agent", {})
-                            if agent_step.get("messages"):
-                                last_message = agent_step["messages"][-1]
+                                # Extract the final answer when no tool call is made
                                 if not last_message.tool_calls and last_message.content:
                                     state_dict["final_answer"] += last_message.content
                                     message_placeholder.markdown(
                                         state_dict["final_answer"] + "▌"
                                     )
+
+                        # Check for the output of the tool execution
+                        elif "tool" in chunk:
+                            tool_step = chunk.get("tool", {})
+                            if messages := tool_step.get("messages"):
+                                tool_output = messages[-1].content
+                                tool_output_md = (
+                                    f"**Tool Output:**\n```\n{tool_output}\n```\n\n"
+                                )
+                                if tool_output_md not in state_dict["thoughts"]:
+                                    state_dict["thoughts"] += tool_output_md
+                                    thought_container.markdown(state_dict["thoughts"])
 
                 # Prepare the inputs for the agent
                 inputs = {
@@ -173,13 +130,17 @@ if prompt := st.chat_input("Ask me anything..."):
                 # Run the async streaming function
                 agent_loop.run_until_complete(stream_agent_response(state))
 
-                # Display the final answer and add it to session state
+                # Display the final answer without the blinking cursor
                 final_answer = state["final_answer"]
                 message_placeholder.markdown(final_answer)
 
-                if final_answer:
-                    st.session_state.messages.append(
-                        {"role": "assistant", "content": final_answer}
-                    )
+                # Append the complete message with thoughts to the session history
+                if final_answer or state["thoughts"]:
+                    assistant_message = {
+                        "role": "assistant",
+                        "content": final_answer,
+                        "thoughts": state["thoughts"],
+                    }
+                    st.session_state.messages.append(assistant_message)
     else:
         st.warning("Agent is not initialized. Please check the console for errors.")
