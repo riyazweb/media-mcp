@@ -18,39 +18,29 @@ def init_agent():
     try:
         client = MultiServerMCPClient(
             {
-                # Assumes your file tools are on this server
                 "file_management": {
                     "url": "http://localhost:8000/mcp",
                     "transport": "streamable_http",
                 },
-                # Example of another tool server
                 "web_search": {
                     "url": "http://localhost:8001/mcp",
                     "transport": "streamable_http",
                 },
             }
         )
-
-        # Create a fresh event loop for synchronous startup in Streamlit
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-
-        # Fetch the tools from your running servers
         tools = loop.run_until_complete(client.get_tools())
         if not tools:
-            st.error(
-                "Failed to fetch any tools from the MCP servers. Please ensure they are running and exposing tools correctly."
-            )
+            st.error("Failed to fetch any tools from the MCP servers.")
             return None, None
 
-        # Initialize Groq model
         groq_key = os.getenv("GROQ_API_KEY")
         if not groq_key:
             st.error("GROQ_API_KEY environment variable not set!")
             return None, None
 
         model = ChatGroq(api_key=groq_key, model="llama-3.3-70b-versatile")
-
         agent_executor = create_react_agent(model=model, tools=tools)
         return agent_executor, loop
     except Exception as e:
@@ -60,16 +50,13 @@ def init_agent():
 
 agent, agent_loop = init_agent()
 
-# Initialize session state
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# Display chat history
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Main chat input logic
 if prompt := st.chat_input("Ask me to manage files..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -78,46 +65,60 @@ if prompt := st.chat_input("Ask me to manage files..."):
     if agent and agent_loop:
         with st.chat_message("assistant"):
             with st.spinner("Thinking..."):
-                try:
-                    # The agent expects a list of messages
-                    inputs = {"messages": st.session_state.messages}
+                inputs = {"messages": [("user", prompt)]}
 
-                    # Asynchronously invoke the agent
-                    response = agent_loop.run_until_complete(agent.ainvoke(inputs))
+                with st.expander("🧠 Agent Thoughts", expanded=True):
+                    thought_container = st.empty()
+                    message_placeholder = st.empty()
 
-                    # Extract the last assistant message from the response
-                    assistant_content = ""
-                    if "messages" in response and isinstance(
-                        response["messages"], list
-                    ):
-                        # The final answer is typically the last message in the list
-                        last_message = response["messages"][-1]
-                        if hasattr(last_message, "content"):
-                            assistant_content = last_message.content
+                    state = {"thoughts": "", "final_answer": ""}
 
-                    if not assistant_content:
-                        assistant_content = (
-                            "Sorry, I received an unexpected response structure."
-                        )
+                    # --- MODIFIED SECTION ---
+                    async def stream_agent_response(state_dict):
+                        async for chunk in agent.astream(inputs):
+                            # Check for agent's decision to call a tool
+                            if "agent" in chunk:
+                                agent_step = chunk["agent"]
+                                if agent_step.get("messages"):
+                                    last_message = agent_step["messages"][-1]
+                                    # INSTEAD of .log, we check for .tool_calls
+                                    if last_message.tool_calls:
+                                        for tool_call in last_message.tool_calls:
+                                            tool_name = tool_call["name"]
+                                            tool_args = tool_call["args"]
+                                            thought = f"Tool Call:\n- **Tool:** `{tool_name}`\n- **Arguments:** `{tool_args}`\n\n"
+                                            state_dict["thoughts"] += thought
+                                            thought_container.markdown(
+                                                state_dict["thoughts"]
+                                            )
 
-                    st.markdown(assistant_content)
+                            # Check for the output of the tool execution
+                            elif "tool" in chunk:
+                                tool_step = chunk["tool"]
+                                if tool_step.get("messages"):
+                                    tool_output = tool_step["messages"][-1].content
+                                    state_dict[
+                                        "thoughts"
+                                    ] += f"Tool Output:\n```\n{tool_output}\n```\n\n"
+                                    thought_container.markdown(state_dict["thoughts"])
+
+                            # Extract the final answer when no tool call is made
+                            if "messages" in chunk.get("agent", {}):
+                                last_message = chunk["agent"]["messages"][-1]
+                                if not last_message.tool_calls and last_message.content:
+                                    state_dict["final_answer"] += last_message.content
+                                    message_placeholder.markdown(
+                                        state_dict["final_answer"] + "▌"
+                                    )
+
+                    agent_loop.run_until_complete(stream_agent_response(state))
+
+                final_answer = state["final_answer"]
+                message_placeholder.markdown(final_answer)
+
+                if final_answer:
                     st.session_state.messages.append(
-                        {"role": "assistant", "content": assistant_content}
+                        {"role": "assistant", "content": final_answer}
                     )
-
-                except Exception as e:
-                    st.error(f"Error calling agent: {str(e)}")
     else:
-        st.warning(
-            "Agent is not initialized. Please check the configuration and server status."
-        )
-
-
-# Sidebar for chat controls
-with st.sidebar:
-    st.header("Chat Controls")
-    if st.button("Clear Chat History"):
-        st.session_state.messages = []
-        st.rerun()
-
-    st.info("This agent connects to your running MCP servers to perform tasks.")
+        st.warning("Agent is not initialized.")

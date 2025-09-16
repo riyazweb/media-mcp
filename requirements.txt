@@ -7,3 +7,4 @@ ddgs
 beautifulsoup4
 requests
 streamlit
+nltk
