@@ -178,9 +178,13 @@ def extract_relevant_content(
         }
 
 
-# --- Test Execution Block ---
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    try:
+        mcp.run(transport="streamable-http")
+    except ConnectionResetError:
+        pass
+    except Exception as e:
+        print(f"Server error: {e}")
     # print("--- Running Agent Tool Test with Link Removal ---")
 
     # user_query = "What are the health benefits of green tea?"

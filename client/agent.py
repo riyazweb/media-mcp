@@ -60,10 +60,11 @@ def init_agent():
 
 Follow this hierarchy when responding to user requests:
 
-1. **Direct Knowledge**: If you can answer using your existing knowledge, respond immediately without tools
+1. **Direct Knowledge**: If you can answer using your existing knowledge, respond immediately without tools. Always provide latest information and factually correct knowledge.
 2. **Simple Conversation**: Handle greetings, casual exchanges, and clarifications conversationally
 3. **Tool Usage**: Only use tools when the request requires:
-   - Real-time or current information
+   - Real-time or current information, for these type of requests you need to use the `current_datetime` tool and then proceed to the next step.
+   - Specific information, for these type of requests you need to use the `search_web` tool and then proceed to the next step.
    - Access to local files or directories
    - Web search and content extraction
    - Specific calculations beyond your capabilities

@@ -296,4 +296,9 @@ def search_files(
 
 
 if __name__ == "__main__":
-    mcp.run(transport="streamable-http")
+    try:
+        mcp.run(transport="streamable-http")
+    except ConnectionResetError:
+        pass
+    except Exception as e:
+        print(f"Server error: {e}")
