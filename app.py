@@ -50,9 +50,6 @@ if prompt := st.chat_input("Ask me anything..."):
                 # Asynchronous function to stream the agent's response
                 async def stream_agent_response(state_dict):
                     async for chunk in agent.astream(inputs):
-                        with open("log.txt", "a") as f:
-                            f.write(f"{chunk}\n")
-
                         if "agent" in chunk:
                             agent_step = chunk.get("agent", {})
                             if messages := agent_step.get("messages"):

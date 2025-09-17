@@ -17,9 +17,9 @@ with open(CONFIG_FILE_PATH, "r") as f:
 
 if len(config.get("allowed_paths", [])) == 0:
     print("No allowed paths found in config.json. Using only the current directory.")
-    ALLOWED_PATHS = [Path(".").expanduser().resolve()]
+    ALLOWED_PATHS = [Path(".").expanduser().absolute()]
 else:
-    ALLOWED_PATHS = [Path(p).expanduser().resolve() for p in config["allowed_paths"]]
+    ALLOWED_PATHS = [Path(p).expanduser().absolute() for p in config["allowed_paths"]]
 
 # --- Create the directories if they don't exist ---
 print("Allowed paths:")
@@ -27,20 +27,26 @@ for p in ALLOWED_PATHS:
     print(f"- 📁 {p}")
     p.mkdir(exist_ok=True)
 
+
 def safe_path(path: str) -> Path:
     """
     Resolves a path and ensures it is within one of the ALLOWED_PATHS.
     """
-    resolved_path = Path(path).expanduser().resolve()
-    if not any(
-        resolved_path == p or str(resolved_path).startswith(str(p) + os.sep)
-        for p in ALLOWED_PATHS
-    ):
-        raise PermissionError(
-            f"Access denied: {resolved_path} is not within any allowed sandbox directory."
-        )
-    return resolved_path
-
+    resolved_path = (
+        Path(path).expanduser().absolute()
+    )  # Changed to absolute() to avoid following symlinks
+    norm_resolved = os.path.normcase(str(resolved_path))
+    for p in ALLOWED_PATHS:
+        norm_p = os.path.normcase(str(p))
+        norm_sep = os.path.normcase(os.sep)
+        prefix = norm_p
+        if not prefix.endswith(norm_sep):
+            prefix += norm_sep
+        if norm_resolved == norm_p or norm_resolved.startswith(prefix):
+            return resolved_path
+    raise PermissionError(
+        f"Access denied: {resolved_path} is not within any allowed sandbox directory."
+    )
 
 
 @mcp.tool("allowed_paths")
@@ -52,16 +58,17 @@ def allowed_paths():
     return {"paths": [str(p) for p in ALLOWED_PATHS]}
 
 
-
 @mcp.tool("current_directory")
 def current_directory():
     """
     Get the primary working directory for the agent.
     Returns the first path from the list of allowed sandbox directories.
     """
-    primary_dir = ALLOWED_PATHS[0]
-    return {"path": str(primary_dir), "name": primary_dir.name}
-
+    try:
+        cwd = safe_path(str(Path.cwd()))
+        return {"path": str(cwd)}
+    except Exception:
+        return {"error": "Current directory is not within the allowed paths."}
 
 
 @mcp.tool("list_directory")
