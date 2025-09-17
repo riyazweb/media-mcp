@@ -8,3 +8,11 @@ beautifulsoup4
 requests
 streamlit
 nltk
+transformers
+torch
+pillow
+numpy
+imagehash
+chromadb
+sentencepiece
+faiss-cpu
