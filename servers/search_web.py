@@ -7,7 +7,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from ddgs import DDGS
 from urllib.parse import urlparse
-from typing import List, Dict, Any, Generator
+from typing import Dict, Any, Generator
 from mcp.server.fastmcp import FastMCP
 
 mcp = FastMCP("web_search_scraper", port=8001)
@@ -71,6 +71,11 @@ def current_datetime():
 def search_web(query: str, max_results: int = 5) -> Dict[str, Any]:
     """
     Performs a web search using DuckDuckGo and returns the results.
+    Arguments:
+    - query: The search query to use.
+    - max_results (optional): The maximum number of results to return. Defaults to 5.
+    Returns:
+    - A dictionary containing the results of the search.
     """
     print(f"-> Searching for: '{query}'")
     try:
@@ -100,6 +105,12 @@ def extract_relevant_content(
     """
     Scrapes a webpage and extracts the most relevant sentences based on a query.
     This version removes all hyperlink text from the final output.
+    Arguments:
+    - url: The URL of the webpage to scrape.
+    - query: The query to use for extracting relevant content.
+    - max_chars (optional): The maximum number of characters to include in the final output. Defaults to 3000.
+    Returns:
+    - A dictionary containing the URL and the extracted content.
     """
     print(f"-> Extracting content from '{url}' relevant to '{query}'")
     try:

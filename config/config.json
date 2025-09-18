@@ -1,0 +1,12 @@
+{
+    "allowed_paths": [
+        "D:\\",
+        "C:\\Users\\sirim\\Downloads",
+        "C:\\Users\\sirim\\Documents",
+        "F:\\",
+        "E:\\"
+    ],
+    "media_index_allowed_paths": [
+        "D:\\Coding\\MediaMCP\\media"
+    ]
+}

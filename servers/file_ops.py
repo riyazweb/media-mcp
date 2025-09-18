@@ -1,31 +1,24 @@
 import os
 import shutil
-import json
 from pathlib import Path
 from datetime import datetime
 from mcp.server.fastmcp import FastMCP
 
-CONFIG_FILE_PATH = Path("config.json").resolve()
+from config.settings import load_config_loud
+import utils.image_search_utils as image_utils
 
 mcp = FastMCP("file_management", port=8000)
 
-if not CONFIG_FILE_PATH.exists():
-    raise FileNotFoundError(f"Config file not found at {CONFIG_FILE_PATH}")
-
-with open(CONFIG_FILE_PATH, "r") as f:
-    config = json.load(f)
-
-if len(config.get("allowed_paths", [])) == 0:
-    print("No allowed paths found in config.json. Using only the current directory.")
-    ALLOWED_PATHS = [Path(".").expanduser().absolute()]
-else:
-    ALLOWED_PATHS = [Path(p).expanduser().absolute() for p in config["allowed_paths"]]
-
+config = load_config_loud()
 # --- Create the directories if they don't exist ---
 print("Allowed paths:")
-for p in ALLOWED_PATHS:
+for p in config["allowed_paths"]:
     print(f"- 📁 {p}")
     p.mkdir(exist_ok=True)
+
+print("Media indexed paths:")
+for p in config["media_index_allowed_paths"]:
+    print(f"- 📁 {p}")
 
 
 def safe_path(path: str) -> Path:
@@ -36,7 +29,7 @@ def safe_path(path: str) -> Path:
         Path(path).expanduser().absolute()
     )  # Changed to absolute() to avoid following symlinks
     norm_resolved = os.path.normcase(str(resolved_path))
-    for p in ALLOWED_PATHS:
+    for p in config["allowed_paths"]:
         norm_p = os.path.normcase(str(p))
         norm_sep = os.path.normcase(os.sep)
         prefix = norm_p
@@ -53,9 +46,13 @@ def safe_path(path: str) -> Path:
 def allowed_paths():
     """
     Get the list of allowed directories, You are only allowed in these paths and their subdirectories.
-    Returns a list of strings representing the paths.
+    Returns:
+    - A list of strings representing the paths.
     """
-    return {"paths": [str(p) for p in ALLOWED_PATHS]}
+    return {
+        "allowed_paths": [str(p) for p in config["allowed_paths"]],
+        "media_indexed_paths": [str(p) for p in config["media_index_allowed_paths"]],
+    }
 
 
 @mcp.tool("current_directory")
@@ -75,7 +72,11 @@ def current_directory():
 def list_directory(path: str, full_path: bool = False):
     """
     List immediate contents of a directory (non-recursive).
-    Returns relative or absolute paths depending on flag.
+    Arguments:
+    - path: The path to the directory to list.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A list of dictionaries containing the name and type of each item.
     """
     try:
         base = safe_path(path)
@@ -97,7 +98,14 @@ def list_directory(path: str, full_path: bool = False):
 
 @mcp.tool("read_file")
 def read_file(path: str, full_path: bool = False):
-    """Read a file's contents as text."""
+    """
+    Read a file's contents as text.
+    Arguments:
+    - path: The path to the file to read.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary containing the path and the contents of the file.
+    """
     try:
         file_path = safe_path(path)
         if not file_path.is_file():
@@ -112,12 +120,31 @@ def read_file(path: str, full_path: bool = False):
 
 
 @mcp.tool("write_file")
-def write_file(path: str, content: str, full_path: bool = False):
-    """Write text content to a file (overwrite if exists)."""
+def write_file(
+    path: str,
+    content: str,
+    append: bool = False,
+    overwrite: bool = False,
+    full_path: bool = False,
+):
+    """
+    Write text content to a file (overwrite if exists).
+    Arguments:
+    - path: The path to the file to write to.
+    - content: The text content to write to the file.
+    - append (optional): If True, appends to the file instead of overwriting. Defaults to False.
+    - overwrite (optional): If True, overwrites the file if it exists. Defaults to False.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         file_path = safe_path(path)
+        if (not overwrite) and file_path.exists():
+            return {"error": f"File already exists at {path}"}
         file_path.parent.mkdir(parents=True, exist_ok=True)
-        with file_path.open("w", encoding="utf-8") as f:
+        mode = "a" if append else "w"
+        with file_path.open(mode, encoding="utf-8") as f:
             f.write(content)
         return {
             "success": True,
@@ -129,7 +156,14 @@ def write_file(path: str, content: str, full_path: bool = False):
 
 @mcp.tool("delete_file")
 def delete_file(path: str, full_path: bool = False):
-    """Delete a file."""
+    """
+    Delete a file.
+    Arguments:
+    - path: The path to the file to delete.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         file_path = safe_path(path)
         if not file_path.exists():
@@ -150,7 +184,14 @@ def delete_file(path: str, full_path: bool = False):
 
 @mcp.tool("create_directory")
 def create_directory(path: str, full_path: bool = False):
-    """Create a directory (including parents)."""
+    """
+    Create a directory (including parents).
+    Arguments:
+    - path: The path to the directory to create.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         dir_path = safe_path(path)
         dir_path.mkdir(parents=True, exist_ok=True)
@@ -161,7 +202,14 @@ def create_directory(path: str, full_path: bool = False):
 
 @mcp.tool("delete_directory")
 def delete_directory(path: str, full_path: bool = False):
-    """Delete an empty directory."""
+    """
+    Delete an empty directory.
+    Arguments:
+    - path: The path to the directory to delete.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         dir_path = safe_path(path)
         dir_path.rmdir()
@@ -172,7 +220,14 @@ def delete_directory(path: str, full_path: bool = False):
 
 @mcp.tool("delete_directory_recursive")
 def delete_directory_recursive(path: str, full_path: bool = False):
-    """Delete a directory and all of its contents (⚠️ irreversible)."""
+    """
+    Delete a directory and all of its contents (⚠️ irreversible).
+    Arguments:
+    - path: The path to the directory to delete.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         dir_path = safe_path(path)
         shutil.rmtree(dir_path)
@@ -183,7 +238,15 @@ def delete_directory_recursive(path: str, full_path: bool = False):
 
 @mcp.tool("copy_file")
 def copy_file(src: str, dest: str, full_path: bool = False):
-    """Copy a file to a new location."""
+    """
+    Copy a file to a new location.
+    Arguments:
+    - src: The path to the file to copy.
+    - dest: The path to the new location for the file.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         src_path = safe_path(src)
         dest_path = safe_path(dest)
@@ -199,7 +262,15 @@ def copy_file(src: str, dest: str, full_path: bool = False):
 
 @mcp.tool("move_file")
 def move_file(src: str, dest: str, full_path: bool = False):
-    """Move (or rename) a file."""
+    """
+    Move (or rename) a file.
+    Arguments:
+    - src: The path to the file to move.
+    - dest: The path to the new location for the file.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary indicating success or failure.
+    """
     try:
         src_path = safe_path(src)
         dest_path = safe_path(dest)
@@ -215,7 +286,14 @@ def move_file(src: str, dest: str, full_path: bool = False):
 
 @mcp.tool("get_file_info")
 def get_file_info(path: str, full_path: bool = False):
-    """Get file metadata (size, modified time, created time)."""
+    """
+    Get file metadata (size, modified time, created time).
+    Arguments:
+    - path: The path to the file to get metadata for.
+    - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A dictionary containing the path, file type, size, modified time, and created time.
+    """
     try:
         file_path = safe_path(path)
         if not file_path.exists():
@@ -252,12 +330,15 @@ def search_files(
 ):
     """
     Search for files inside a directory.
+    Arguments:
     - path: The directory to start the search from. Must be within the sandbox.
     - name (optional): Match a substring in the filename (case-insensitive).
     - extension (optional): Filter by file extension (e.g., '.txt', 'py').
     - recursive (optional): If True, searches subdirectories. Defaults to True.
     - max_depth (optional): Limits how deep the recursive search goes. Defaults to 3.
     - full_path (optional): If True, returns absolute paths. Defaults to False (relative).
+    Returns:
+    - A list of dictionaries containing the name, type, and path of each file.
     """
     try:
         base = safe_path(path)
@@ -293,6 +374,35 @@ def search_files(
         return {"results": results}
     except Exception as e:
         return {"error": str(e)}
+
+
+# Image related tools
+@mcp.tool("search_image_by_text")
+def search_image_by_text(query: str, top_k: int = 5):
+    """
+    Search for images by text query semantically.
+    Arguments:
+    - query: The text query to search for.
+    - top_k (optional): The number of results to return. Defaults to 5.
+    Returns:
+    - A list of absolute paths to the images.
+    """
+    res = image_utils.search_by_text(query, top_k)
+    return [str(p[2]) for p in res]
+
+
+@mcp.tool("search_by_image")
+def search_by_image(path: str, top_k: int = 5):
+    """
+    Search for similar images by providing the path to an image.
+    Arguments:
+    - path: The path to the image to search for.
+    - top_k (optional): The number of results to return. Defaults to 5.
+    Returns:
+    - A list containing the absolute paths to the images.
+    """
+    res = image_utils.search_by_image(path, top_k)
+    return {"results": [str(p[2]) for p in res]}
 
 
 if __name__ == "__main__":

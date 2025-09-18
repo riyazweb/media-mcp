@@ -25,7 +25,7 @@ def init_agent():
                     "url": "http://localhost:8000/mcp",
                     "transport": "streamable_http",
                 },
-                "web_search": {
+                "web_search_scraper": {
                     "url": "http://localhost:8001/mcp",
                     "transport": "streamable_http",
                 },
