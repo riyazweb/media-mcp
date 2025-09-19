@@ -12,3 +12,4 @@ wheels/
 /database/
 /media/
 /models/
+/config/config.json

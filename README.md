@@ -1,4 +1,4 @@
-# MediaMCP – Intelligent Local-First Media Management 🧠
+# MediaMCP – Intelligent Local Media Management 🧠
 
 ## Introduction
 
@@ -92,7 +92,6 @@ All heavy image and video processing stays on your computer for **total privacy*
 git clone https://github.com/smv-manovihar/MediaMCP.git
 cd MediaMCP
 ```
-
 ---
 
 ### 2. Install `uv` (Python package manager)
@@ -115,16 +114,26 @@ uv sync
 
 This will:
 
-- Create and manage a virtual environment automatically (no need to set up `venv` manually ✅)
+- Automatically create and manage a virtual environment (✅ no need for manual `venv`)
 - Install all required dependencies
-
-_(If you prefer, you can still use `uv add -r requirements.txt` for a one-off install.)_
 
 ---
 
-### 4. Start the MCP Servers
+### 4. Configure Environment Variables
 
-MediaMCP relies on separate MCP servers that must run in **different terminals**.
+Create a `.env` file in the project root (`~/MediaMCP/.env`) and add your **Groq API key**:
+
+```env
+GROQ_API_KEY=your_api_key_here
+```
+
+⚠️ Make sure you replace `your_api_key_here` with your actual key from [Groq](https://console.groq.com/).
+
+---
+
+### 5. Start the MCP Servers
+
+Run the servers in **separate terminals**:
 
 #### Terminal 1 – File Operations Server
 
@@ -142,21 +151,21 @@ python -m servers.search_web
 
 ---
 
-### 5. Run the Client Application
+### 6. Run the Client Application
 
-In a **third terminal**, launch the Streamlit client:
+In a **third terminal**, start the Streamlit app:
 
 ```bash
 cd ~/MediaMCP/
 streamlit run app.py
 ```
 
-This starts the **MediaMCP chat interface** at [http://localhost:8501](http://localhost:8501) 🎉
+This launches the **MediaMCP chat interface** in your browser at [http://localhost:8501](http://localhost:8501) 🎉
 
 ---
 
 ⚠️ **Important**
-All three processes (**file_ops server**, **search_web server**, and **Streamlit client**) must be running **simultaneously in separate terminals** for MediaMCP to work properly.
+All three processes (**file_ops server**, **search_web server**, and **Streamlit client**) must be running **simultaneously in separate terminals** for MediaMCP to function correctly.
 
 ---
 
