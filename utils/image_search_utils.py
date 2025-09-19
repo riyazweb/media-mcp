@@ -1,31 +1,48 @@
-import os
-import glob
-import hashlib
-import sqlite3
-import threading
+import os, glob, hashlib, sqlite3, threading, torch, chromadb
+import warnings
 from contextlib import contextmanager
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import List, Dict
 from PIL import Image
 import numpy as np
-import torch
 from tqdm import tqdm
-import chromadb
 from transformers import AutoProcessor, AutoModel
+from transformers.utils import logging as hf_logging
 
 MODEL_NAME = "google/siglip-base-patch16-224"
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 BASE_DIR = Path(__file__).parent.parent
 DB_DIR = BASE_DIR / "database"
-DB_DIR.mkdir(parents=True, exist_ok=True)
 
+
+LOCAL_MODEL_PATH = BASE_DIR / "models" / "siglip-base-patch16-224"
 CHROMADB_PATH = DB_DIR / "chroma_store"
 SQLITE_PATH = str(DB_DIR / "images.sqlite")
 
-processor = AutoProcessor.from_pretrained(MODEL_NAME)
-model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
+DB_DIR.mkdir(parents=True, exist_ok=True)
+LOCAL_MODEL_PATH.mkdir(parents=True, exist_ok=True)
+
+hf_logging.set_verbosity_error()
+os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+warnings.filterwarnings("ignore", message=".*slow image processor.*")
+
+
+def load_model():
+    if LOCAL_MODEL_PATH.exists():
+        processor = AutoProcessor.from_pretrained(LOCAL_MODEL_PATH)
+        model = AutoModel.from_pretrained(LOCAL_MODEL_PATH).to(DEVICE).eval()
+    else:
+        processor = AutoProcessor.from_pretrained(MODEL_NAME)
+        model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
+        LOCAL_MODEL_PATH.mkdir(parents=True, exist_ok=True)
+        processor.save_pretrained(LOCAL_MODEL_PATH)
+        model.save_pretrained(LOCAL_MODEL_PATH)
+    return processor, model
+
+
+processor, model = load_model()
 
 chroma_client = chromadb.PersistentClient(path=str(CHROMADB_PATH))
 chroma_coll = chroma_client.get_or_create_collection(

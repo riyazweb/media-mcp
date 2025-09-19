@@ -1,41 +1,63 @@
 import streamlit as st
 import os
 from client.agent import init_agent
-from utils.image_search_utils import incremental_scan_silent  # Direct import
+from utils.image_search_utils import incremental_scan_silent
 from config.settings import load_config, save_config
 
-# --- Streamlit Page Configuration ---
 st.set_page_config(page_title="MediaMCP", page_icon="🤖")
 st.title("📁 MediaMCP")
 
-# Initialize the agent and event loop once
+# --- Assistant Greeting ---
+with st.chat_message("assistant"):
+    st.markdown(
+        "👋 Hi! I'm **MediaMCP** — your local-first media and file assistant.  \n\n"
+        "I can help you:\n"
+        "- 📂 Create, read, move, copy, or delete files and folders\n"
+        "- 🖼️ Find images by description or locate visually similar ones with an image reference\n"
+        "- 🔎 Search the web and extract relevant content with smart scraping\n\n"
+        "👉 You can manage file system path permissions from the **sidebar**. What would you like to do today?"
+    )
+
 agent, agent_loop = init_agent()
 
-# Initialize session state keys if they don't exist
 if "messages" not in st.session_state:
     st.session_state.messages = []
 
-# --- Sidebar for Settings ---
+if "media_feedback" not in st.session_state:
+    st.session_state.media_feedback = None
+if "allowed_feedback" not in st.session_state:
+    st.session_state.allowed_feedback = None
+
+
+def _dismiss_media_feedback():
+    st.session_state.media_feedback = None
+
+
+def _dismiss_allowed_feedback():
+    st.session_state.allowed_feedback = None
+
+
 with st.sidebar:
     st.header("⚙️ Manage Paths & Scan")
 
     config = load_config()
 
-    # Initialize session state for path lists from the loaded config
     if "temp_media_paths" not in st.session_state:
         st.session_state.temp_media_paths = list(
             config.get("media_index_allowed_paths", [])
         )
     if "temp_allowed_paths" not in st.session_state:
         st.session_state.temp_allowed_paths = list(config.get("allowed_paths", []))
-    if "sidebar_scan_result" not in st.session_state:
-        st.session_state.sidebar_scan_result = None
 
-    # --- FORM 1: Media Index Paths ---
+    status_map = {
+        "success": st.success,
+        "error": st.error,
+        "warning": st.warning,
+        "info": st.info,
+    }
+
     with st.form(key="media_paths_form"):
         st.subheader("Media Index Paths (for scanning)")
-
-        # Display existing paths and their remove buttons
         paths_to_remove_media = []
         for i, path in enumerate(st.session_state.temp_media_paths):
             col1, col2 = st.columns([4, 1], vertical_alignment="bottom")
@@ -51,14 +73,11 @@ with st.sidebar:
             ):
                 paths_to_remove_media.append(i)
 
-        # Handle the logic for removing paths AFTER the loop
         if paths_to_remove_media:
-            # Remove in reverse order to avoid index shifting issues
             for index in sorted(paths_to_remove_media, reverse=True):
                 st.session_state.temp_media_paths.pop(index)
             st.rerun()
 
-        # Input for adding a new path
         new_media_path = st.text_input(
             "Add new media path", placeholder="Enter a directory to scan..."
         )
@@ -91,51 +110,60 @@ with st.sidebar:
         if save_media_button or scan_button:
             config["media_index_allowed_paths"] = st.session_state.temp_media_paths
             save_config(config)
-            st.toast("✅ Media Index Paths have been saved!")
-            # Clean up the temp state to force reload from config on next run
-            del st.session_state.temp_media_paths
+
+            if save_media_button and not scan_button:
+                st.session_state.media_feedback = {
+                    "status": "success",
+                    "message": "✅ Media Index Paths have been saved!",
+                }
+                st.session_state.pop("temp_media_paths", None)
+                st.rerun()
 
             if scan_button:
                 valid_paths = [
                     p for p in config["media_index_allowed_paths"] if os.path.isdir(p)
                 ]
-                if valid_paths:
-                    with st.spinner("Scanning... This may take time."):
-                        try:
-                            result = incremental_scan_silent(valid_paths)
-                            result_md = (
-                                f"**Scan Complete:**\n"
-                                f"- Total: `{result['total_media_count']}`\n"
-                                f"- New: `{result['new_media_count']}`\n"
-                                f"- Updated: `{result['updated_media_count']}`\n"
-                                f"- Deleted: `{result['deleted_media_count']}`"
-                            )
-                            st.session_state.sidebar_scan_result = {
-                                "status": "success",
-                                "message": result_md,
-                            }
-                        except Exception as e:
-                            st.session_state.sidebar_scan_result = {
-                                "status": "error",
-                                "message": f"❌ Scan failed: {e}",
-                            }
-                else:
-                    st.session_state.sidebar_scan_result = {
+                if not valid_paths:
+                    st.session_state.media_feedback = {
                         "status": "warning",
                         "message": "No valid media paths to scan.",
                     }
-            st.rerun()
+                    st.session_state.pop("temp_media_paths", None)
+                    st.rerun()
+                # use Streamlit spinner to show execution progress
+                try:
+                    with st.spinner(
+                        "⏳ Scanning... This may take a while depending on paths."
+                    ):
+                        result = incremental_scan_silent(valid_paths)
+                    result_md = (
+                        f"**Scan Complete:**\n"
+                        f"- Total: `{result['total_media_count']}`\n"
+                        f"- New: `{result['new_media_count']}`\n"
+                        f"- Updated: `{result['updated_media_count']}`\n"
+                        f"- Deleted: `{result['deleted_media_count']}`"
+                    )
+                    st.session_state.media_feedback = {
+                        "status": "success",
+                        "message": result_md,
+                    }
+                except Exception as e:
+                    st.session_state.media_feedback = {
+                        "status": "error",
+                        "message": f"❌ Scan failed: {e}",
+                    }
+                finally:
+                    st.session_state.pop("temp_media_paths", None)
+                    st.rerun()
 
-    # Display Scan Result in Sidebar
-    if st.session_state.sidebar_scan_result:
-        result = st.session_state.sidebar_scan_result
-        status_map = {"success": st.success, "error": st.error, "warning": st.warning}
-        status_map[result["status"]](result["message"])
-        st.session_state.sidebar_scan_result = None
+    # show media feedback immediately below the media form, with an on_click callback
+    if st.session_state.media_feedback:
+        fb = st.session_state.media_feedback
+        status_map.get(fb.get("status", "info"), st.info)(fb.get("message", ""))
+        st.button("OK", key="dismiss_media_feedback", on_click=_dismiss_media_feedback)
 
     st.markdown("---")
 
-    # --- FORM 2: General Allowed Paths (Corrected with the same logic) ---
     with st.form(key="allowed_paths_form"):
         st.subheader("General Allowed Paths (for agent tools)")
         paths_to_remove_allowed = []
@@ -186,12 +214,20 @@ with st.sidebar:
         if save_allowed_button:
             config["allowed_paths"] = st.session_state.temp_allowed_paths
             save_config(config)
-            st.toast("✅ General Allowed Paths have been saved!")
-            del st.session_state.temp_allowed_paths
+            st.session_state.allowed_feedback = {
+                "status": "success",
+                "message": "✅ General Allowed Paths have been saved!",
+            }
+            st.session_state.pop("temp_allowed_paths", None)
             st.rerun()
 
-# --- Main Chat Interface ---
-# Display past messages from chat history
+    if st.session_state.allowed_feedback:
+        fb = st.session_state.allowed_feedback
+        status_map.get(fb.get("status", "info"), st.info)(fb.get("message", ""))
+        st.button(
+            "OK", key="dismiss_allowed_feedback", on_click=_dismiss_allowed_feedback
+        )
+
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         if (
@@ -199,11 +235,10 @@ for message in st.session_state.messages:
             and "thoughts" in message
             and message["thoughts"]
         ):
-            with st.expander("🧠 Agent Thoughts"):
+            with st.expander("🧠 Thoughts"):
                 st.markdown(message["thoughts"])
         st.markdown(message["content"])
 
-# Handle new user input
 if prompt := st.chat_input("Ask me anything..."):
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
@@ -254,11 +289,7 @@ if prompt := st.chat_input("Ask me anything..."):
                                         )
                                 if last_message.tool_calls:
                                     for tc in last_message.tool_calls:
-                                        tool_call_md = (
-                                            f"**Tool Call:**\n"
-                                            f"- **Tool:** `{tc['name']}`\n"
-                                            f"- **Arguments:** `{tc['args']}`\n\n"
-                                        )
+                                        tool_call_md = f"**Tool Call:**\n- **Tool:** `{tc['name']}`\n- **Arguments:** `{tc['args']}`\n\n"
                                         if tool_call_md not in state_dict["thoughts"]:
                                             state_dict["thoughts"] += tool_call_md
                                             thought_container.markdown(
