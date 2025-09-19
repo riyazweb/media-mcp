@@ -89,7 +89,7 @@ All heavy image and video processing stays on your computer for **total privacy*
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/<your-username>/MediaMCP.git
+git clone https://github.com/smv-manovihar/MediaMCP.git
 cd MediaMCP
 ```
 
@@ -118,7 +118,7 @@ This will:
 - Create and manage a virtual environment automatically (no need to set up `venv` manually ✅)
 - Install all required dependencies
 
-_(If you prefer, you can still use `uv pip install -r requirements.txt` for a one-off install.)_
+_(If you prefer, you can still use `uv add -r requirements.txt` for a one-off install.)_
 
 ---
 
