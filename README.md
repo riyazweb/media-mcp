@@ -89,7 +89,7 @@ All heavy image and video processing stays on your computer for **total privacy*
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/smv-manovihar/MediaMCP.git
+git clone https://github.com/smv-manovihar/media-mcp.git
 cd MediaMCP
 ```
 ---
