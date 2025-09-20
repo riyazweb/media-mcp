@@ -69,7 +69,7 @@ with st.sidebar:
                 label_visibility="collapsed",
             )
             if col2.form_submit_button(
-                "🗑️", key=f"remove_media_{i}", use_container_width=True
+                "🗑️", use_container_width=True
             ):
                 paths_to_remove_media.append(i)
 
@@ -177,7 +177,7 @@ with st.sidebar:
                 label_visibility="collapsed",
             )
             if col2.form_submit_button(
-                "🗑️", key=f"remove_allowed_{i}", use_container_width=True
+                "🗑️", use_container_width=True
             ):
                 paths_to_remove_allowed.append(i)
 
