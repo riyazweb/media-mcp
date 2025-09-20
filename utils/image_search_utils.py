@@ -15,30 +15,31 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 
 BASE_DIR = Path(__file__).parent.parent
 DB_DIR = BASE_DIR / "database"
+MODEL_CACHE_DIR = BASE_DIR / "models"
 
-
-LOCAL_MODEL_PATH = BASE_DIR / "models" / "siglip-base-patch16-224"
 CHROMADB_PATH = DB_DIR / "chroma_store"
 SQLITE_PATH = str(DB_DIR / "images.sqlite")
 
 DB_DIR.mkdir(parents=True, exist_ok=True)
-LOCAL_MODEL_PATH.mkdir(parents=True, exist_ok=True)
+MODEL_CACHE_DIR.mkdir(parents=True, exist_ok=True)
 
-hf_logging.set_verbosity_error()
+# Suppress progress bars and warnings
 os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
+hf_logging.set_verbosity_error()
 warnings.filterwarnings("ignore", message=".*slow image processor.*")
 
 
 def load_model():
-    if LOCAL_MODEL_PATH.exists():
-        processor = AutoProcessor.from_pretrained(LOCAL_MODEL_PATH)
-        model = AutoModel.from_pretrained(LOCAL_MODEL_PATH).to(DEVICE).eval()
-    else:
-        processor = AutoProcessor.from_pretrained(MODEL_NAME)
-        model = AutoModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
-        LOCAL_MODEL_PATH.mkdir(parents=True, exist_ok=True)
-        processor.save_pretrained(LOCAL_MODEL_PATH)
-        model.save_pretrained(LOCAL_MODEL_PATH)
+    """Load model into project-local cache dir"""
+    processor = AutoProcessor.from_pretrained(
+        MODEL_NAME, cache_dir=str(MODEL_CACHE_DIR)
+    )
+    model = (
+        AutoModel.from_pretrained(MODEL_NAME, cache_dir=str(MODEL_CACHE_DIR))
+        .to(DEVICE)
+        .eval()
+    )
     return processor, model
 
 
